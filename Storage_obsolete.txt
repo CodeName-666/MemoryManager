@@ -1,0 +1,346 @@
+#include "Storage.h"
+#include "storage_debug.h"
+#include <EEPROM.h>
+
+namespace Storage{
+
+Storage_Header_t dataValidation;
+
+StorageData_t eepromData;
+
+
+
+const char *Storage_idxToString(uint16_t idx);
+void Storage_readAll(void);
+void Storage_copyData(uint8_t *source, uint8_t *destination, int16_t size);
+bool Storage_hasDataOfIdxChanged(int16_t idx);
+void Storage_write(int16_t idx);
+uint16_t Storage_getOffest(uint16_t idx);
+uint32_t Storage_calculateEepromCrc(Storage_e storageType);
+void Storage_WriteDefaultData(void);
+void Storage_debugPrint(void);
+
+/**
+ * @brief Converter function to get infos about Storage Data from index vlaue
+ * 
+ * @param idx Index of data
+ * @return const char* Sting (Name) of data
+ */
+const char *Storage_idxToString(uint16_t idx)
+{
+    switch (idx)
+    {
+    case 0: 
+        return "DATA_VALIDATION";
+    case 1:
+        return "UTC_TIME";
+    case 2:
+        return "IS SYNCED";
+    case 3:
+        return "UTC_TIME OFFSET";
+    case 4:
+        return "BRIGHTNESS";
+    case 5:
+        return "IS ENABLED";
+    case 6:
+        return "R,G,B";
+    case 7:
+        return "COLORSWITCH";
+    case 9: 
+        return "ACTIVATION TIME";
+    case 10:
+        return "Rotations Per Minute";
+    default:
+        return "UNKOWN";
+    }
+}
+
+
+/**
+ * @brief Function to initialize the Storage modul
+ * 
+ * @param storageSize Size of EEPROM 
+ */
+void Storage_begin(size_t storageSize)
+{
+    Storage_Header_t* vData;
+    Storage_Header_t* vDefaultData;
+    uint32_t crc;
+
+    EEPROM.begin(storageSize);
+
+    vData = (Storage_Header_t*)storage[EEPROM_DATA_VALIDATION_IDX].internal_data;
+    vDefaultData = (Storage_Header_t*) storage[EEPROM_DATA_VALIDATION_IDX].default_data;
+    
+    //Read EEPROM Data for the next validation steps.
+    Storage_readAll();
+
+    crc = Storage_calculateEepromCrc(INTERNAL_DATA);
+    /* 
+     * In case of an invalid key or an invalid crc, 
+     * the data is corrupted.--> Write default data.
+     */ 
+    if(vData->key != KEY_VALID_DATA || vData->crc32 != crc)
+    {
+            DBIF_LOG_INFO(".... Invalid KeyData ....");
+            Storage_WriteDefaultData();          
+    }
+    else
+    {
+        DBIF_LOG_INFO(".... Correct KeyData ....");
+        if(vDefaultData->dVersion > vData->dVersion)
+        {
+            DBIF_LOG_INFO(".... Update EEPROM Data ....");
+            Storage_WriteDefaultData();
+        }
+        else
+        {
+            DBIF_LOG_INFO(".... EEPROM Data Valid and Loaded ....");
+        }
+    }
+
+    DBIF_LOG_INFO(".... Read all ....");
+    Storage_readAll();
+
+    Storage_debugPrint();
+}
+
+/**
+ * @brief Function to read all from EEPROM
+ * 
+ * Data will be stored into eepromData struct and also copied into each global parameter
+ */
+void Storage_readAll(void)
+{
+    uint16_t offset = 0;
+    for (uint16_t i = 0; i < NUMBER_OF_EEPROM_DATA; i++)
+    {
+        offset = Storage_getOffest(i);
+
+        for (uint16_t j = 0; j < storage[i].data_length; j++)
+        {
+            storage[i].eeprom_data[j] = EEPROM.read(offset + j);
+        }
+        Storage_copyData(storage[i].eeprom_data, storage[i].internal_data, storage[i].data_length);
+    }
+}
+
+/**
+ * @brief Copy data 
+ * 
+ * @param source Data which should be copied
+ * @param destination Target where the data will be copied 
+ * @param size Size of the copied data
+ */
+void Storage_copyData(uint8_t *source, uint8_t *destination, int16_t size)
+{
+    for (int16_t i = 0; i < size; i++)
+    {
+        destination[i] = source[i];
+    }
+}
+
+/**
+ * @brief Function to check if data has changed
+ * 
+ * @param idx Index of the storge struct to check
+ * @return true Data has changed
+ * @return false Data has not changed
+ * 
+ * This function check whether the eeprom_data is different to the internal_data of the storage struct.
+ */
+bool Storage_hasDataOfIdxChanged(int16_t idx)
+{
+    for (uint16_t i = 0; i < storage[idx].data_length; i++)
+    {
+        if (storage[idx].eeprom_data[i] != storage[idx].internal_data[i])
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief Cyclic main function
+ * 
+ */
+void Storage_loop(void)
+{
+    bool data_changed = false;
+    Storage_Header_t *vData = (Storage_Header_t *)storage[EEPROM_DATA_VALIDATION_IDX].internal_data; 
+    for (int16_t idx = 0; idx < NUMBER_OF_EEPROM_DATA; idx++)
+    {
+        if (Storage_hasDataOfIdxChanged(idx))
+        {
+            DBIF_LOG_INFO("... Data %s changed ...", Storage_idxToString(idx));
+            Storage_copyData(storage[idx].internal_data,
+                             storage[idx].eeprom_data,
+                             storage[idx].data_length);
+
+            Storage_write(idx);
+            data_changed = true;
+        }
+    }
+
+    if (data_changed)
+    {   
+        vData->key = KEY_VALID_DATA;
+        vData->crc32 = Storage_calculateEepromCrc(INTERNAL_DATA);
+        Storage_copyData(storage[EEPROM_DATA_VALIDATION_IDX].internal_data,
+                             storage[EEPROM_DATA_VALIDATION_IDX].eeprom_data,
+                             storage[EEPROM_DATA_VALIDATION_IDX].data_length);
+        
+        Storage_write(EEPROM_DATA_VALIDATION_IDX);
+        Storage_debugPrint();
+        EEPROM.commit();
+    }
+}
+
+/**
+ * @brief Function to write a single data into the EEPROM.
+ * 
+ * @param idx Index of the storage which has to be written.
+ */
+void Storage_write(int16_t idx)
+{
+    uint16_t offset = 0;
+    offset = Storage_getOffest(idx);
+    for (uint16_t j = 0; j < storage[idx].data_length; j++)
+    {
+        EEPROM.write(offset + j, storage[idx].eeprom_data[j]);
+    }
+}
+
+/**
+ * @brief Calculate the byte offset value of a storage index
+ * 
+ * @param idx Storage index until the offset will be calculated
+ * @return uint16_t Offest in bytes
+ */
+uint16_t Storage_getOffest(uint16_t idx)
+{
+    uint16_t offset = 0;
+    if (idx == 0)
+        return 0;
+
+    for (uint16_t i = 0; i < idx; i++)
+    {
+        offset += storage[i].data_length;
+    }
+    return offset;
+}
+
+/**
+ * @brief General function to check whether data of storage has changed
+ * 
+ * @return true Data has changed
+ * @return false Data has not changed
+ */
+bool Storage_hasDataChanged(void)
+{
+    CRC32 crc;
+    for (uint16_t i = 0; i < NUMBER_OF_EEPROM_DATA; i++)
+    {
+        if (Storage_hasDataOfIdxChanged(i))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief Caclulates the CRC32 checksum of the storage
+ * 
+ * @param storageType Type which CRC32 should be calculated 
+ * @return uint32_t CRC Checksum
+ */
+uint32_t Storage_calculateEepromCrc(Storage_e storageType)
+{
+    uint8_t* data;
+    uint32_t length;
+    CRC32 crc;
+    crc.reset();
+    for(uint16_t i = 0; i < NUMBER_OF_EEPROM_DATA; i++)
+    {   
+        if(i != EEPROM_DATA_VALIDATION_IDX)
+        {
+            switch(storageType)
+            {
+                case INTERNAL_DATA:
+                    data = storage[i].internal_data;
+                break;
+                case EEPROM_DATA:
+                    data = storage[i].eeprom_data;
+                break;
+                case DEFAULT_DATA:
+                    data = storage[i].internal_data;
+                break;
+                default:
+                    data = nullptr;
+                break;
+            }
+            length = storage[i].data_length;
+            if(data != nullptr)
+            {
+                crc.update(data,length);
+            }
+        }
+    }
+
+    return crc.finalize();
+}
+
+/**
+ * @brief Function to write the DefaultData into EEPROM
+ * 
+ */
+void Storage_WriteDefaultData(void)
+{
+    DBIF_LOG_INFO("....... Write DEFAULT DATA .......");
+    uint32_t crc = Storage_calculateEepromCrc(DEFAULT_DATA);
+    Storage_Header_t *vData = (Storage_Header_t *)storage[EEPROM_DATA_VALIDATION_IDX].default_data;
+    
+    vData->crc32 = crc;
+    vData->key = KEY_VALID_DATA;
+
+    for (int16_t i = 1; i < NUMBER_OF_EEPROM_DATA; i++)
+    {
+        Storage_copyData((uint8_t *)storage[i].default_data, storage[i].eeprom_data, storage[i].data_length);
+        Storage_write(i);
+    }
+
+    Storage_write(EEPROM_DATA_VALIDATION_IDX);
+    Storage_debugPrint();
+    EEPROM.commit();
+}
+
+/**
+ * @brief HELP DebugPrint function to print all values of the EEPROM
+ * 
+ */
+void Storage_debugPrint(void)
+{
+
+    DBIF_LOG_INFO("....... EEPROM DATA .......");
+    DBIF_LOG_INFO("         + DATA_VALIDATION: - Version = %i, Key = %i, CRC = %i", eepromData.dataValidation.dVersion, 
+                                                                                    eepromData.dataValidation.key,
+                                                                                    eepromData.dataValidation.crc32);
+    DBIF_LOG_INFO("         + UTC_Time = %s ", eepromData.utc_time.toString());
+    DBIF_LOG_INFO("         + Is Synced = %i ", eepromData.isSyncronized);
+    DBIF_LOG_INFO("         + UTC_Time Offset = %i ", eepromData.utc_time_offset);
+    DBIF_LOG_INFO("         + Brightness = %i%% ", eepromData.brightness_percent);
+    DBIF_LOG_INFO("         + Is Enabled = %i ", eepromData.isEnabled);
+    DBIF_LOG_INFO("         + RGB Color R = %i, G = %i,  B = %i ", eepromData.newColor.r,eepromData.newColor.g, eepromData.newColor.b);
+    DBIF_LOG_INFO("         + ColorSwitchafterRestart = %i ", eepromData.colorSwitchAfterRestart);
+    DBIF_LOG_INFO("         + Activation Start = %s ", eepromData.activationTime.from.toString());
+    DBIF_LOG_INFO("         + Activation End = %s ", eepromData.activationTime.to.toString());
+    DBIF_LOG_INFO("         + Steps Per Second = %i ", eepromData.stepsPerSec);
+
+}
+
+
+
+
+}
