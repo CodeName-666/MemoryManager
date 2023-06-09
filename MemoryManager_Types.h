@@ -94,7 +94,14 @@ public:
      *
      * Initializes all member variables to default values.
      */
-    MemoryManagerBlock();
+    MemoryManagerBlock() : m_user_data(nullptr), 
+                           m_eeprom_data(nullptr),
+                           m_default_data(nullptr), 
+                           m_data_length(0),
+                           m_block_params{MemoryManagerStatus_e::STATUS_UNINIT, MemoryBlockWrite_e::WRITE_NOT_CONFIGURED},
+                           m_block_params_update(false)
+    {
+    }
 
     /**
      * @brief Constructor for MemoryManagerBlock.
@@ -110,7 +117,15 @@ public:
                        uint8_t *eeprom_data, 
                        uint32_t data_length,
                        uint8_t *default_data = nullptr, 
-                       MemoryBlockWrite_e write_flag = WRITE_NOT_CONFIGURED);
+                       MemoryBlockWrite_e write_flag = MemoryBlockWrite_e::WRITE_NOT_CONFIGURED) : 
+                                               m_user_data(user_data),
+                                               m_eeprom_data(eeprom_data),
+                                               m_default_data(default_data),
+                                               m_data_length(data_length),
+                                               m_block_params{MemoryManagerStatus_e::STATUS_UNINIT, write_flag},
+                                               m_block_params_update(false)
+    {
+    }
 
     /**
      * @brief Templated constructor for MemoryManagerBlock.
@@ -123,9 +138,13 @@ public:
      * @param data_length Length of data.
      * @param default_data Pointer to default data.
      */
-    template <class T = uint8_t>
-    explicit MemoryManagerBlock(T* user_data, T* eeprom_data, uint32_t data_length,
-                       T* default_data = nullptr);
+
+    /*template<class T = uint8_t> explicit MemoryManagerBlock(T* user_data, T* eeprom_data, uint32_t data_length,
+                       T* default_data = nullptr) : m_user_data(reinterpret_cast<uint8_t*>(user_data)),
+                                                 m_eeprom_data(reinterpret_cast<uint8_t*>(eeprom_data)),
+                                                 m_default_data(reinterpret_cast<uint8_t*>(default_data)),
+                                                 m_data_length(data_length), m_init(false)
+    {
 
     /**
      * @brief Getter for user data.
@@ -134,7 +153,7 @@ public:
      * @return Pointer to user data.
      */
     template <typename T = uint8_t>
-    T *user_data() const;
+    T *user_data() const { return reinterpret_cast<T *>(m_user_data); }
 
     /**
      * @brief Setter for user data.
@@ -143,7 +162,7 @@ public:
      * @param user_data Pointer to user data.
      */
     template <typename T = uint8_t>
-    void user_data(T *user_data);
+    void user_data(T *user_data) { m_user_data = reinterpret_cast<uint8_t *>(user_data); }
 
     /**
      * @brief Getter for EEPROM data.
@@ -152,7 +171,7 @@ public:
      * @return Pointer to EEPROM data.
      */
     template <typename T = uint8_t>
-    T *eeprom_data() const;
+    T *eeprom_data() const { return reinterpret_cast<T *>(m_eeprom_data); }
 
     /**
      * @brief Setter for EEPROM data.
@@ -161,7 +180,7 @@ public:
      * @param eeprom_data Pointer to EEPROM data.
      */
     template <typename T = uint8_t>
-    void eeprom_data(T *eeprom_data);
+    void eeprom_data(T *eeprom_data) { m_eeprom_data = eeprom_data; }
 
     /**
      * @brief Getter for default data.
@@ -170,7 +189,7 @@ public:
      * @return Pointer to default data.
      */
     template <typename T = uint8_t>
-    T *default_data() const;
+    T *default_data() const { return reinterpret_cast<T *>(m_default_data); }
 
     /**
      * @brief Setter for default data.
@@ -179,68 +198,66 @@ public:
      * @param default_data Pointer to default data.
      */
     template <typename T = uint8_t>
-    void default_data(T *default_data);
+    void default_data(T *default_data) { m_default_data = reinterpret_cast<T *>(default_data); }
 
     /**
      * @brief Getter for data length.
      *
      * @return Length of data.
      */
-    uint32_t data_length() const;
+    uint32_t data_length() const { return m_data_length; }
 
     /**
      * @brief Setter for data length.
      *
      * @param data_length Length of data.
      */
-    void data_length(uint32_t data_length);
+    void data_length(uint32_t data_length) { m_data_length = data_length; }
 
     /**
      * @brief Getter for the status of the MemoryManager block.
      *
      * @return Status of the MemoryManager block.
      */
-    MemoryManagerStatus_e status() const;
+    MemoryManagerStatus_e status() const { return m_block_params.status; }
 
     /**
      * @brief Setter for the status of the MemoryManager block.
      *
      * @param status Status of the MemoryManager block.
      */
-    void status(MemoryManagerStatus_e status);
-
-    /**
-     * @brief Getter for the write flag of the MemoryManager block.
-     *
-     * @return Write flag of the MemoryManager block.
-     */
-    MemoryBlockWrite_e write_flag() const;
-
+    void status(MemoryManagerStatus_e status) { m_block_params_update = true;
+                                                m_block_params.status = status; }
+	
+	/**
+	 *
+	 */
+	 MemoryBlockWrite_e write_flag(void) { return m_block_params.write_flag; }
     /**
      * @brief Setter for the write flag of the MemoryManager block.
      *
      * @param write_flag Write flag of the MemoryManager block.
      */
-    void write_flag(MemoryBlockWrite_e write_flag);
+	void write_flag(MemoryBlockWrite_e write_flag) { m_block_params_update = true;}
 
     /**
      * @brief Getter for the block parameters.
      *
      * @return Pointer to the block parameters.
      */
-    MemoryBlockParams_t *block_parameters() const;
+    MemoryBlockParams_t *bock_parameter(void) { return &m_block_params; }
 
     /**
      * @brief Getter for the block parameters update flag.
      *
      * @return Block parameters update flag.
      */
-    bool block_params_update() const;
+     bool block_params_update(void) {return m_block_params_update;}
 
     /**
      * @brief Resets the block parameters update flag.
      */
-    void reset_block_params_update();
+	void reset_block_params_update(void) {m_block_params_update = false;}
 
     /**
      * @brief Get the data of the specified type.
@@ -250,15 +267,35 @@ public:
      * @return Pointer to the data of the specified type.
      */
     template <typename T = uint8_t>
-    T* get_data(MemoryManagerType_e type);
-
+    T* get_data(MemoryManagerType_e type)
+    {
+         T *ret = NULL;
+   
+        switch (type)
+        {
+            case MemoryManagerType_e::USER_DATA:
+                ret = user_data<T>();
+                break;
+            case MemoryManagerType_e::MEMORY_DATA:
+                ret = eeprom_data<T>();
+                break;
+            case MemoryManagerType_e::DEFAULT_DATA:
+                ret = default_data<T>();
+                break;
+            default:
+                ret = NULL;
+                break;
+        }
+        return ret;
+    }
+	
     /**
      * @brief Overloaded equality operator for comparing MemoryManagerBlock objects.
      *
      * @param other The other MemoryManagerBlock object to compare to.
      * @return True if the objects are equal, false otherwise.
      */
-    bool operator==(const MemoryManagerBlock &other) const;
+    inline bool operator==(const MemoryManagerBlock &other) { return compare(other) == 0; }
 
     /**
      * @brief Overloaded inequality operator for comparing MemoryManagerBlock objects.
@@ -266,7 +303,23 @@ public:
      * @param other The other MemoryManagerBlock object to compare to.
      * @return True if the objects are not equal, false otherwise.
      */
-    bool operator!=(const MemoryManagerBlock &other) const;
+    inline bool operator!=(const MemoryManagerBlock &other) { return compare(other) != 0; }
+private:
+    uint16_t compare(const MemoryManagerBlock &other)
+    {
+        int16_t ret = 0;
+        ret = memcmp(m_user_data, other.user_data(), m_data_length);
+        ret += memcmp(m_eeprom_data, other.eeprom_data(), m_data_length);
+        ret += memcmp(m_default_data, other.default_data(), m_data_length);
+        return ret;
+    }
+private:
+    uint8_t *m_user_data;               /**< Pointer to user data. */
+    uint8_t *m_eeprom_data;             /**< Pointer to EEPROM data. */
+    uint8_t *m_default_data;            /**< Pointer to default data. */
+    uint32_t m_data_length;             /**< Length of data. */
+    MemoryBlockParams_t m_block_params; /**< Boolean value indicating whether the data has been initialized. */
+    bool m_block_params_update;
 };
 
 /**
@@ -290,7 +343,7 @@ union MemoryManagerVersion_t
      * @param other The other MemoryManagerVersion_t object to compare to.
      * @return True if the objects are equal, false otherwise.
      */
-    bool operator==(const MemoryManagerVersion_t &other) const;
+    bool operator==(const MemoryManagerVersion_t &other) const { return u32 == other.u32; }
 
     /**
      * @brief Overloaded greater than operator for comparing MemoryManagerVersion_t objects.
@@ -298,7 +351,7 @@ union MemoryManagerVersion_t
      * @param other The other MemoryManagerVersion_t object to compare to.
      * @return True if this object is greater than the other object, false otherwise.
      */
-    bool operator>(const MemoryManagerVersion_t &other) const;
+    bool operator>(const MemoryManagerVersion_t &other) const {return u32 > other.u32 ; }
 
     /**
      * @brief Overloaded greater than or equal to operator for comparing MemoryManagerVersion_t objects.
@@ -306,7 +359,7 @@ union MemoryManagerVersion_t
      * @param other The other MemoryManagerVersion_t object to compare to.
      * @return True if this object is greater than or equal to the other object, false otherwise.
      */
-    bool operator>=(const MemoryManagerVersion_t &other) const;
+    bool operator>=(const MemoryManagerVersion_t &other) const {return u32 >= other.u32; }
 
     /**
      * @brief Overloaded less than operator for comparing MemoryManagerVersion_t objects.
@@ -314,7 +367,7 @@ union MemoryManagerVersion_t
      * @param other The other MemoryManagerVersion_t object to compare to.
      * @return True if this object is less than the other object, false otherwise.
      */
-    bool operator<(const MemoryManagerVersion_t &other) const;
+    bool operator<(const MemoryManagerVersion_t &other) const {return  u32 < other.u32; }
 
     /**
      * @brief Overloaded less than or equal to operator for comparing MemoryManagerVersion_t objects.
@@ -322,7 +375,7 @@ union MemoryManagerVersion_t
      * @param other The other MemoryManagerVersion_t object to compare to.
      * @return True if this object is less than or equal to the other object, false otherwise.
      */
-    bool operator<=(const MemoryManagerVersion_t &other) const;
+    bool operator<=(const MemoryManagerVersion_t &other) const {return u32 <= other.u32; }
 };
 
 
